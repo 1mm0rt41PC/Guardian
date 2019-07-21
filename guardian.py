@@ -75,7 +75,7 @@ TG_LOGS_WATCHER = tmp;
 
 if TG_WATCH_PORTS == 'auto':
 	try:
-		stdout,stderr = subprocess.Popen(r"(/bin/echo -e '25\n53'; ss -lntu | grep -Fi 'LISTEN' | grep -vF '127.0.0.1' | grep -vF '::1' | awk '{print $5}' | sed 's/\*://g' | sed 's/://g') | sort -u -n | paste -sd ',' -", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
+                stdout,stderr = subprocess.Popen(r"(/bin/echo -e '59753\n25\n53'; ss -lntu | grep -Fi 'LISTEN' | grep -vF '127.0.0.1' | grep -vF '::1' | awk '{print $5}' | awk -F: '{print $NF}') | sort -u -n | paste -sd ',' -", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
 		stdout = stdout.decode('utf8').strip('\r\n\t ');
 		TG_WATCH_PORTS = stdout;
 		if not TG_WATCH_PORTS:
