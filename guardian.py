@@ -37,7 +37,7 @@ os.umask(0o077);# default umask => rw- --- ---
 TG_ETH = 'ens3';# Interface to watch
 # List of ports to be monitored.
 # if TG_WATCH_PORTS='auto' => TG_WATCH_PORTS will be generated at with netstat/ss
-# It's possible to invert the liste of ports by adding an extra ! before the list:
+# It's possible to invert the list of ports by adding an extra ! before the list:
 # TG_WATCH_PORTS='!22,80,443' => banny any access to all ports except on ports 22,80,443
 TG_WATCH_PORTS = 'auto';
 
@@ -64,7 +64,7 @@ if os.path.exists('/etc/guardian.allow'):
 		TG_WHITE_IP += '\n'+fp.read().replace('\r','');
 TG_BLACK_IP = '';
 if os.path.exists('/etc/guardian.deny'):
-	with open('/etc/guardian.allow','r') as fp:
+	with open('/etc/guardian.deny','r') as fp:
 		TG_BLACK_IP += '\n'+fp.read().replace('\r','');
 TG_BANED_IP_COUNTER = {};
 # Convert TG_LOGS_WATCHER
@@ -75,7 +75,7 @@ TG_LOGS_WATCHER = tmp;
 
 if TG_WATCH_PORTS == 'auto':
 	try:
-		stdout,stderr = subprocess.Popen(r"(/bin/echo -e '25\n53'; ss -lntu | grep -Fi 'LISTEN' | grep -vF '127.0.0.1' | grep -vF '::1' | awk '{print $5}' | sed 's/\*://g' | sed 's/://g') | sort -u -n | paste -sd ',' -", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
+                stdout,stderr = subprocess.Popen(r"(/bin/echo -e '25\n53'; ss -lntu | grep -Fi 'LISTEN' | grep -vF '127.0.0.1' | grep -vF '::1' | awk '{print $5}' | awk -F: '{print $NF}') | sort -u -n | paste -sd ',' -", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
 		stdout = stdout.decode('utf8').strip('\r\n\t ');
 		TG_WATCH_PORTS = stdout;
 		if not TG_WATCH_PORTS:
