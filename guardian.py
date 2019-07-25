@@ -442,7 +442,7 @@ def authSSHFilter( line ):
 
 
 def kernelLog( line ):
-	if '[IPTABLES]' not in line:
+	if '[GUARDIAN]' not in line:
 		return;
 	ip = line.split(' SRC=')[-1].split(' ')[0];
 	port = line.split(' DPT=')[-1].split(' ')[0];
@@ -473,9 +473,9 @@ def initIptables():
 	if TG_WATCH_PORTS.startswith('!'):
 		ports = TG_WATCH_PORTS[1:];
 		invert = '!';
-	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j LOG --log-prefix "[IPTABLES]"'%(TG_ETH,invert,ports));
+	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j LOG --log-prefix "[GUARDIAN]"'%(TG_ETH,invert,ports));
 	runcmd('ip6tables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
-	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j LOG --log-prefix "[IPTABLES]"'%(TG_ETH,invert,ports));
+	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j LOG --log-prefix "[GUARDIAN]"'%(TG_ETH,invert,ports));
 	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
