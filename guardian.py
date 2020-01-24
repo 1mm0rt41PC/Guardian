@@ -186,7 +186,7 @@ def main():
 				except:
 					pass;
 				print('[*] Cleaning iptables rules');
-				os.system('iptables -X; iptables -F; ip6tables -X; ip6tables -F');
+				os.system('iptables -F; iptables -X; ip6tables -F; ip6tables -X');
 				print('[*] Enable logging martians packets');
 				with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 					fp.write('1\n');
@@ -466,7 +466,7 @@ def reloadFileRotate( fp ):
 def initIptables():
 	print('[%s] Init iptables'%(strftime(TG_DATE_FORMAT)));
 	print('[%s] List of ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS));
-	runcmd('iptables -X; iptables -F; ip6tables -X; ip6tables -F');
+	runcmd('iptables -F; iptables -X; ip6tables -F; ip6tables -X');
 	runcmd('iptables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
 	runcmd('ip6tables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
 	invert = '';
