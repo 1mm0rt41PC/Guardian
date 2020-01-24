@@ -468,14 +468,22 @@ def initIptables():
 	print('[%s] List of ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS));
 	runcmd('iptables -X; iptables -F; ip6tables -X; ip6tables -F');
 	runcmd('iptables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
+	runcmd('ip6tables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
 	invert = '';
 	ports = TG_WATCH_PORTS;
 	if TG_WATCH_PORTS.startswith('!'):
 		ports = TG_WATCH_PORTS[1:];
 		invert = '!';
-	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j LOG --log-prefix "[GUARDIAN]"'%(TG_ETH,invert,ports));
-	runcmd('ip6tables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
-	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j LOG --log-prefix "[GUARDIAN]"'%(TG_ETH,invert,ports));
+		
+	runcmd('iptables -N GUARDIAN');
+	runcmd('ip6tables -N GUARDIAN');
+	runcmd('iptables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
+	runcmd('iptables -A GUARDIAN -j DROP');
+	runcmd('ip6tables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
+	runcmd('ip6tables -A GUARDIAN -j DROP');
+	
+	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_ETH,invert,ports));
+	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_ETH,invert,ports));
 	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
