@@ -19,7 +19,7 @@
 # along with this program; see the file COPYING. If not, write to the
 # Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 from time import sleep, time, strftime;
-import os, sys, re;
+import os, sys, re, shutil;
 from glob import glob;
 import re;
 import subprocess;
@@ -34,7 +34,6 @@ os.umask(0o077);# default umask => rw- --- ---
 
 ####################################################################################################
 # v - CONFIGURATION - v
-TG_ETH = 'ens3';# Interface to watch
 # List of ports to be monitored.
 # if TG_WATCH_PORTS='auto' => TG_WATCH_PORTS will be generated at with netstat/ss
 # It's possible to invert the list of ports by adding an extra ! before the list:
@@ -84,16 +83,8 @@ if TG_WATCH_PORTS == 'auto':
 	except Exception as e:
 		print('[!] Unable to get the list off allowed ports: '+str(e));
 		sys.exit(2);
-try:
-	stdout,stderr = subprocess.Popen(r"ip addr show "+TG_ETH+" > /dev/null 2>&1 && echo 1 || echo 0", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
-	stdout = stdout.decode('utf8').strip('\r\n\t ');
-	if '0' in stdout:
-		raise Exception('Interface '+TG_ETH+' doesn\'t exist !');
-except Exception as e:
-	print('[!] Error while checking interface '+TG_ETH+': '+str(e));
-	sys.exit(1);
 
-os.system('mkdir -p "%s"'%(TG_BAN));
+os.makedirs(TG_BAN, exist_ok=True)
 
 
 TG_ISTESTREGEXP = 0;
@@ -104,8 +95,9 @@ def main():
 		if len(sys.argv) == 2:
 			if sys.argv[1] == 'status' or sys.argv[1] == 'st':
 				print('[*] Instance');
-				os.system('echo -n "NB instance: "; ps faux | grep -E \'[g]uardian\' | grep -F daemon | wc -l');
-				os.system('ps faux | grep -E \'[g]uardian\' | grep -F daemon | sed "s/^/    /"');
+				print('[*] NB instance: ');
+				os.system('ps faux | grep -Ei \'[g]uardian\' | grep -F daemon | wc -l');
+				os.system('ps faux | grep -Ei \'[g]uardian\' | grep -F daemon | sed "s/^/    /"');
 				print('');
 				print('[*] Actualy dropped');
 				#print('    '+('\n'.join(glob(TG_BAN+'/*'))).replace('\n','\n    '));
@@ -346,12 +338,12 @@ def ban( ip, reason, black=False, iptables=False ):
 			open(TG_BAN+'/'+ip,'w').close();
 		if ':' in ip:
 			if iptables:
-				runcmd('ip6tables -I INPUT 1 -i %s -s %s -m comment --comment \'%s\' -j DROP'%(TG_ETH, ip, '[GUARDIAN] '+reason));
+				runcmd('ip6tables -I INPUT 1 ! -i lo -s %s -m comment --comment \'%s\' -j DROP'%(ip, '[GUARDIAN] '+reason));
 			else:
 				runcmd('ip -6 r add blackhole "%s" >> %s 2>&1'%(ip, TG_LOG));
 		else:
 			if iptables:
-				runcmd('iptables -I INPUT 1 -i %s -s %s -m comment --comment \'%s\' -j DROP'%(TG_ETH, ip, '[GUARDIAN] '+reason));
+				runcmd('iptables -I INPUT 1 ! -i lo -s %s -m comment --comment \'%s\' -j DROP'%(ip, '[GUARDIAN] '+reason));
 			else:
 				runcmd('ip r add blackhole "%s"'%(ip), ignoreTxt='RTNETLINK answers: File exists');
 	if ip in TG_BANED_IP_COUNTER:
@@ -370,7 +362,7 @@ def unban( ip ):
 		runcmd('ip -6 r del "%s"'%(ip));
 	else:
 		runcmd('ip r del "%s"'%(ip));
-	runcmd('rm -f -- "%s"'%(TG_BAN+'/'+ip));
+	os.remove(TG_BAN+'/'+ip);
 	sys.stdout.flush();
 	sys.stderr.flush();
 
@@ -467,8 +459,8 @@ def initIptables():
 	print('[%s] Init iptables'%(strftime(TG_DATE_FORMAT)));
 	print('[%s] List of ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS));
 	runcmd('iptables -F; iptables -X; ip6tables -F; ip6tables -X');
-	runcmd('iptables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
-	runcmd('ip6tables -A INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT'%(TG_ETH));
+	runcmd('iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
+	runcmd('ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
 	invert = '';
 	ports = TG_WATCH_PORTS;
 	if TG_WATCH_PORTS.startswith('!'):
@@ -482,8 +474,8 @@ def initIptables():
 	runcmd('ip6tables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
 	runcmd('ip6tables -A GUARDIAN -j DROP');
 	
-	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_ETH,invert,ports));
-	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_ETH,invert,ports));
+	runcmd('iptables -A INPUT -p tcp -m multiport %s --dports %s -j GUARDIAN'%(invert,ports));
+	runcmd('ip6tables -A INPUT -p tcp -m multiport %s --dports %s -j GUARDIAN'%(invert,ports));
 	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
