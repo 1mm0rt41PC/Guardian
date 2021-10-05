@@ -156,7 +156,7 @@ def main():
 				sys.exit(0);
 			elif sys.argv[1] == 'run' or sys.argv[1] == 'start':
 				try:
-					pid = open(TG_RUN_PID, 'rb').read();
+					pid = open(TG_RUN_PID, 'r').read();
 					cmd = open('/proc/'+pid+'/cmdline').read();
 					if 'daemon' in cmd:
 						print('[*] Daemon already exist');
@@ -197,7 +197,7 @@ def main():
 				print('[*] Dameon mode');
 				sys.stdout = open(TG_LOG, 'a+');
 				sys.stderr = sys.stdout;
-				with open(TG_RUN_PID,'wb') as fp:
+				with open(TG_RUN_PID,'w') as fp:
 					fp.write(str(os.getpid()));
 					fp.flush();
 				print('[%s] '%(strftime(TG_DATE_FORMAT))+'*'*100);
