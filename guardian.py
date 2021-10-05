@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #coding: utf8
 # The Guardian - A simple script that whatch for unusual tcp/http/ssh activity and ban ip via routing
 #
