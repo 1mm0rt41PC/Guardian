@@ -39,7 +39,7 @@ os.umask(0o077);# default umask => rw- --- ---
 # It's possible to invert the list of ports by adding an extra ! before the list:
 # TG_WATCH_PORTS='!22,80,443' => banny any access to all ports except on ports 22,80,443
 TG_WATCH_PORTS = 'auto';
-
+TG_INTERFACE = 'ens3'; # Interface to watch
 # List of files to be monitored with the associated filter detector
 TG_LOGS_WATCHER = {
 	'/var/log/nginx/access.log': 'httpFilter',
@@ -466,16 +466,15 @@ def initIptables():
 	if TG_WATCH_PORTS.startswith('!'):
 		ports = TG_WATCH_PORTS[1:];
 		invert = '!';
-		
 	runcmd('iptables -N GUARDIAN');
 	runcmd('ip6tables -N GUARDIAN');
 	runcmd('iptables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
 	runcmd('iptables -A GUARDIAN -j DROP');
 	runcmd('ip6tables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
 	runcmd('ip6tables -A GUARDIAN -j DROP');
-	
-	runcmd('iptables -A INPUT -p tcp -m multiport %s --dports %s -j GUARDIAN'%(invert,ports));
-	runcmd('ip6tables -A INPUT -p tcp -m multiport %s --dports %s -j GUARDIAN'%(invert,ports));
+
+	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
+	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
 	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
