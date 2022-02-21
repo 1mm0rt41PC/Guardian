@@ -75,9 +75,9 @@ TG_LOGS_WATCHER = tmp;
 
 if TG_WATCH_PORTS_TCP == 'auto':
 	with open('/proc/net/tcp','r') as fp:
-		TG_WATCH_PORTS_TCP = [25,53]
+		TG_WATCH_PORTS_TCP = ['25','53']
 		for port in re.findall(r'\s*\d+: 00000000:([a-zA-Z0-9]+)', fp.read()):
-			TG_WATCH_PORTS_TCP += [int(port,16)]
+			TG_WATCH_PORTS_TCP += [str(int(port,16))]
 		TG_WATCH_PORTS_TCP = ','.join(sorted(set(TG_WATCH_PORTS_TCP)))
 	if not TG_WATCH_PORTS_TCP:
 		raise Exception('Unable to list local open TCP ports');
@@ -85,9 +85,9 @@ if TG_WATCH_PORTS_TCP == 'auto':
 
 if TG_WATCH_PORTS_UDP == 'auto':
 	with open('/proc/net/udp','r') as fp:
-		TG_WATCH_PORTS_UDP = [123,53,68]
+		TG_WATCH_PORTS_UDP = ['123','53','68']
 		for port in re.findall(r'\s*\d+: 00000000:([a-zA-Z0-9]+)', fp.read()):
-			TG_WATCH_PORTS_UDP += [int(port,16)]
+			TG_WATCH_PORTS_UDP += [str(int(port,16))]
 		TG_WATCH_PORTS_UDP = ','.join(sorted(set(TG_WATCH_PORTS_UDP)))
 	if not TG_WATCH_PORTS_UDP:
 		raise Exception('Unable to list local open UDP ports');
@@ -171,7 +171,7 @@ def main():
 						sys.exit(0);
 				except Exception as e:
 					pass;
-				os.system('setsid %s daemon &; echo "Service up and running"; ps faux | grep -E \'[g]uardian\' | grep -F daemon'%(sys.argv[0]));
+				os.system('setsid %s daemon & \n echo "Service up and running"; ps faux | grep -E \'[g]uardian\' | grep -F daemon'%(sys.argv[0]));
 				sys.exit(0);
 			elif sys.argv[1] == 'kill' or sys.argv[1] == 'stop' or sys.argv[1] == 'cleanup':
 				print('[*] Stopping guardian');
