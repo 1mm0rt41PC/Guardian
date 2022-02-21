@@ -23,6 +23,7 @@ import os, sys, re, shutil;
 from glob import glob;
 import re;
 import subprocess;
+import datetime;
 from collections import Counter;
 
 os.umask(0o077);# default umask => rw- --- ---
@@ -114,20 +115,26 @@ def main():
 				print('    '+TG_BLACK_IP.replace('\n','\n    '));
 				os.system('[ "`/sbin/iptables -nvL INPUT | grep GUARDIAN | wc -l`" -gt 0 ] && /sbin/iptables -nvL INPUT | grep -E \'(GUARDIAN|pkts)\' | sed "s/^/    /"');
 				os.system('[ "`/sbin/ip6tables -nvL INPUT | grep GUARDIAN | wc -l`" -gt 0 ] && /sbin/ip6tables -nvL INPUT | grep -E \'(GUARDIAN|pkts)\' | sed "s/^/    /"');
-				print('[*] Most viewed ports');
-				os.system(r'''grep -F 'access to port' %TG_LOG% | awk '{print $13}' | sort -n | uniq -c | awk '{printf("    %05d count on port %d\n", $1, $2)}' | sort -r 2>/dev/null| head -n 30'''.replace('%TG_LOG%',TG_LOG));
-				print('[*] Most viewed ports this week');
-				os.system(r'''grep -F 'access to port' %TG_LOG% | grep -F '#%WEEK%°' | awk '{print $13}' | sort -n | uniq -c | awk '{printf("    %05d count on port %d\n", $1, $2)}' | sort -r 2>/dev/null| head -n 30 | tee /tmp/New-top-ports.log'''.replace('%TG_LOG%',TG_LOG).replace('%WEEK%',strftime('%U')));
-				print('[*] Most viewed ports last week');
-				os.system(r'''grep -F 'access to port' %TG_LOG% | grep -F '#%WEEK%°' | awk '{print $13}' | sort -n | uniq -c | awk '{printf("    %05d count on port %d\n", $1, $2)}' | sort -r 2>/dev/null| head -n 30'''.replace('%TG_LOG%',TG_LOG).replace('%WEEK%',str(int(strftime('%U'),10)-1)));
-				print('[*] Evolution between this week and last week');
-				os.system(r'''grep -F 'access to port' %TG_LOG% | grep -F '#%WEEK%°' | awk '{print $13}' | sort -n | uniq -c | awk '{printf("    %05d count on port %d\n", $1, $2)}' | sort -r 2>/dev/null > /tmp/Old-top-ports.log'''.replace('%TG_LOG%',TG_LOG).replace('%WEEK%',str(int(strftime('%U'),10)-1)));
-				statsEvolution();
-				print('[*] Evolution between this week and all time logs');
-				os.system(r'''grep -F 'access to port' %TG_LOG% | awk '{print $13}' | sort -n | uniq -c | awk '{printf("    %05d count on port %d\n", $1, $2)}' | sort -r 2>/dev/null > /tmp/Old-top-ports.log'''.replace('%TG_LOG%',TG_LOG));
-				statsEvolution();
-				os.remove('/tmp/New-top-ports.log');
-				os.remove('/tmp/Old-top-ports.log');
+
+				tmplog = open(TG_LOG, 'r').read()
+				print('[*] Most viewed TCP ports');			
+				z=re.findall('access to TCP port ([0-9]+)', tmplog)
+				for port,count in Counter(z).most_common(20):
+					print('%05d count on port %d'%(count,port));
+				print('[*] Most viewed UDP ports');
+				z=re.findall('access to UDP port ([0-9]+)', tmplog)
+				for port,count in Counter(z).most_common(20):
+					print('%05d count on port %d'%(count,port));
+
+				currentWeek = str(datetime.date(2010, 6, 16).isocalendar().week)
+				print('[*] Most viewed TCP ports this week');
+				z=re.findall('#'+currentWeek+'&[^\r\n]+ access to TCP port ([0-9]+)', tmplog)
+				for port,count in Counter(z).most_common(20):
+					print('%05d count on port %d'%(count,port));
+				print('[*] Most viewed UDP ports this week');					
+				z=re.findall('#'+currentWeek+'&[^\r\n]+ access to UDP port ([0-9]+)', tmplog)
+				for port,count in Counter(z).most_common(20):
+					print('%05d count on port %d'%(count,port));
 
 				print('');
 				try:
@@ -280,33 +287,6 @@ def main():
 		sleep(1);
 
 
-def statsEvolution():
-	sNew = open('/tmp/New-top-ports.log','rb').read().decode('utf8').replace('\r','').strip('\r\n\t ').split('\n');
-	sOld = open('/tmp/Old-top-ports.log','rb').read().decode('utf8').replace('\r','').strip('\r\n\t ').split('\n');
-	try:
-		for i in range(0,len(sNew)):
-			# 00796 count on port 23
-			sNew[i] = sNew[i].strip('\r\n\t ').split(' ')[4];
-	except:
-		pass;
-	try:
-		for i in range(0,len(sOld)):
-			sOld[i] = sOld[i].strip('\r\n\t ').split(' ')[4];
-	except:
-		pass;
-	for iNewPos in range(0,len(sNew)):
-		try:
-			posOld = sOld.index(sNew[iNewPos]);
-			if posOld > iNewPos:
-				print('    %s (\033[32m%d\033[00m)'%(sNew[iNewPos], posOld-iNewPos));
-			elif posOld < iNewPos:
-				print('    %s (\033[31m%d\033[00m)'%(sNew[iNewPos], posOld-iNewPos));
-			else:
-				print('    %s (-)'%(sNew[iNewPos]));
-		except:
-			print('    %s (\033[32m%s\033[00m)'%(sNew[iNewPos], 'NEW'));
-
-
 def getProcessInfo():
 	os.system('ps faux | grep -Ei \'[g]uardian\' | grep -F daemon');
 
@@ -444,7 +424,10 @@ def kernelLog( line ):
 		return;
 	ip = line.split(' SRC=')[-1].split(' ')[0];
 	port = line.split(' DPT=')[-1].split(' ')[0];
-	ban(ip, 'access to port '+port);
+	if 'PROTO=TCP' in line:
+		ban(ip, 'access to TCP port '+port);
+	else:
+		ban(ip, 'access to UDP port '+port);
 
 
 _reloadFileRotate = {};
