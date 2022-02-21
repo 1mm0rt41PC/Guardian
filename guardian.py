@@ -35,10 +35,11 @@ os.umask(0o077);# default umask => rw- --- ---
 ####################################################################################################
 # v - CONFIGURATION - v
 # List of ports to be monitored.
-# if TG_WATCH_PORTS='auto' => TG_WATCH_PORTS will be generated at with netstat/ss
+# if TG_WATCH_PORTS_TCP='auto' => TG_WATCH_PORTS_TCP will be generated at with netstat/ss
 # It's possible to invert the list of ports by adding an extra ! before the list:
-# TG_WATCH_PORTS='!22,80,443' => banny any access to all ports except on ports 22,80,443
-TG_WATCH_PORTS = 'auto';
+# TG_WATCH_PORTS_TCP='!22,80,443' => banny any access to all ports except on ports 22,80,443
+TG_WATCH_PORTS_TCP = 'auto';
+TG_WATCH_PORTS_UDP = 'auto';
 TG_INTERFACE = 'ens3'; # Interface to watch
 # List of files to be monitored with the associated filter detector
 TG_LOGS_WATCHER = {
@@ -72,17 +73,25 @@ for i in TG_LOGS_WATCHER:
 	tmp[i] = {'fp':None, 'reloadFileRotate':True, 'callback':TG_LOGS_WATCHER[i]};
 TG_LOGS_WATCHER = tmp;
 
-if TG_WATCH_PORTS == 'auto':
-	try:
-		stdout,stderr = subprocess.Popen(r"(/bin/echo -e '25\n53'; ss -lntu | grep -Fi 'LISTEN' | grep -vF '127.0.0.1' | grep -vF '::1' | awk '{print $5}' | awk -F: '{print $NF}') | sort -u -n | paste -sd ',' -", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
-		stdout = stdout.decode('utf8').strip('\r\n\t ');
-		TG_WATCH_PORTS = stdout;
-		if not TG_WATCH_PORTS:
-			raise Exception(stdout+'\n'+stderr.decode('utf8').strip('\r\n\t '));
-		TG_WATCH_PORTS = '!'+TG_WATCH_PORTS;
-	except Exception as e:
-		print('[!] Unable to get the list off allowed ports: '+str(e));
-		sys.exit(2);
+if TG_WATCH_PORTS_TCP == 'auto':
+	with open('/proc/net/tcp','r') as fp:
+		TG_WATCH_PORTS_TCP = [25,53]
+		for port in re.findall(r'\s*\d+: 00000000:([a-zA-Z0-9]+)', fp.read()):
+			TG_WATCH_PORTS_TCP += [int(port,16)]
+		TG_WATCH_PORTS_TCP = ','.join(sorted(set(TG_WATCH_PORTS_TCP)))
+	if not TG_WATCH_PORTS_TCP:
+		raise Exception('Unable to list local open TCP ports');
+	TG_WATCH_PORTS_TCP = '!'+TG_WATCH_PORTS_TCP;
+
+if TG_WATCH_PORTS_UDP == 'auto':
+	with open('/proc/net/udp','r') as fp:
+		TG_WATCH_PORTS_UDP = [123,53,68]
+		for port in re.findall(r'\s*\d+: 00000000:([a-zA-Z0-9]+)', fp.read()):
+			TG_WATCH_PORTS_UDP += [int(port,16)]
+		TG_WATCH_PORTS_UDP = ','.join(sorted(set(TG_WATCH_PORTS_UDP)))
+	if not TG_WATCH_PORTS_UDP:
+		raise Exception('Unable to list local open UDP ports');
+	TG_WATCH_PORTS_UDP = '!'+TG_WATCH_PORTS_UDP;
 
 os.makedirs(TG_BAN, exist_ok=True)
 
@@ -94,13 +103,10 @@ def main():
 	try:
 		if len(sys.argv) == 2:
 			if sys.argv[1] == 'status' or sys.argv[1] == 'st':
-				print('[*] Instance');
-				print('[*] NB instance: ');
-				os.system('ps faux | grep -Ei \'[g]uardian\' | grep -F daemon | wc -l');
-				os.system('ps faux | grep -Ei \'[g]uardian\' | grep -F daemon | sed "s/^/    /"');
+				print('[*] Instance:');
+				getProcessInfo();
 				print('');
 				print('[*] Actualy dropped');
-				#print('    '+('\n'.join(glob(TG_BAN+'/*'))).replace('\n','\n    '));
 				os.system('ip r | grep -F "blackhole" | sed "s/^/    /"');
 				os.system('ip -6 r | grep -F "blackhole" | sed "s/^/    /"');
 				print('');
@@ -130,7 +136,8 @@ def main():
 					print('[*] Actualy white listed');
 					print('    '+TG_WHITE_IP.strip('\r\n\t ').replace('\n','\n    '));
 					print('');
-					print('[*] List of ports watched:\n    %s'%(TG_WATCH_PORTS));
+					print('[*] List of TCP ports watched:\n    %s'%(TG_WATCH_PORTS_TCP));
+					print('[*] List of UDP ports watched:\n    %s'%(TG_WATCH_PORTS_UDP));
 
 				sys.exit(0);
 			elif sys.argv[1] == 'install':
@@ -160,19 +167,14 @@ def main():
 					cmd = open('/proc/'+pid+'/cmdline').read();
 					if 'daemon' in cmd:
 						print('[*] Daemon already exist');
-						os.system('ps faux | grep -E \'[g]uardian\' | grep -F daemon');
+						getProcessInfo();
 						sys.exit(0);
 				except Exception as e:
 					pass;
-				os.system('setsid %s daemon &'%(sys.argv[0]));
-				os.system('echo -n "NB instance: "; ps faux | grep -E \'[g]uardian\' | grep -F daemon | wc -l');
-				os.system('ps faux | grep -E \'[g]uardian\' | grep -F daemon');
+				os.system('setsid %s daemon &; echo "Service up and running"; ps faux | grep -E \'[g]uardian\' | grep -F daemon'%(sys.argv[0]));
 				sys.exit(0);
 			elif sys.argv[1] == 'kill' or sys.argv[1] == 'stop' or sys.argv[1] == 'cleanup':
 				print('[*] Stopping guardian');
-				os.system('echo -n "NB instance: "; ps faux | grep -E \'[g]uardian\' | grep -F daemon | wc -l');
-				os.system('ps faux | grep -E \'[g]uardian\' | grep -F daemon');
-				os.system('ps faux | grep -E \'[g]uardian\' | grep -F daemon | awk \'{print $2}\' | xargs -I "{}" kill -9 "{}"');
 				try:
 					os.remove(TG_RUN_PID);
 				except:
@@ -303,6 +305,10 @@ def statsEvolution():
 				print('    %s (-)'%(sNew[iNewPos]));
 		except:
 			print('    %s (\033[32m%s\033[00m)'%(sNew[iNewPos], 'NEW'));
+
+
+def getProcessInfo():
+	os.system('ps faux | grep -Ei \'[g]uardian\' | grep -F daemon');
 
 
 def listSSHConnexion():
@@ -457,15 +463,12 @@ def reloadFileRotate( fp ):
 
 def initIptables():
 	print('[%s] Init iptables'%(strftime(TG_DATE_FORMAT)));
-	print('[%s] List of ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS));
+	print('[%s] List of TCP ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS_TCP));
+	print('[%s] List of UDP ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS_UDP));
 	runcmd('iptables -F; iptables -X; ip6tables -F; ip6tables -X');
 	runcmd('iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
 	runcmd('ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
-	invert = '';
-	ports = TG_WATCH_PORTS;
-	if TG_WATCH_PORTS.startswith('!'):
-		ports = TG_WATCH_PORTS[1:];
-		invert = '!';
+
 	runcmd('iptables -N GUARDIAN');
 	runcmd('ip6tables -N GUARDIAN');
 	runcmd('iptables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
@@ -473,8 +476,22 @@ def initIptables():
 	runcmd('ip6tables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
 	runcmd('ip6tables -A GUARDIAN -j DROP');
 
+	invert = '';
+	ports = TG_WATCH_PORTS_TCP;
+	if TG_WATCH_PORTS_TCP.startswith('!'):
+		ports = TG_WATCH_PORTS_TCP[1:];
+		invert = '!';
 	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
 	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
+	
+	invert = '';
+	ports = TG_WATCH_PORTS_UDP;
+	if TG_WATCH_PORTS_UDP.startswith('!'):
+		ports = TG_WATCH_PORTS_UDP[1:];
+		invert = '!';
+	runcmd('iptables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
+	runcmd('ip6tables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
+	
 	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
@@ -491,7 +508,8 @@ def logStatus():
 		fp.write('[*] Actualy white listed\n');
 		fp.write('    '+TG_WHITE_IP.strip('\r\n\t ').replace('\n','\n    ')+'\n');
 		fp.write('\n');
-		fp.write('[*] List of ports watched:\n    %s\n'%(TG_WATCH_PORTS));
+		fp.write('[*] List of TCP ports watched:\n    %s\n'%(TG_WATCH_PORTS_TCP));
+		fp.write('[*] List of UDP ports watched:\n    %s\n'%(TG_WATCH_PORTS_UDP));
 
 
 def runcmd(cmd, echo=False, ignoreTxt=''):
