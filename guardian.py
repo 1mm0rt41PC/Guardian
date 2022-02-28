@@ -22,6 +22,7 @@ from time import sleep, time, strftime;
 import os, sys, re, shutil;
 from glob import glob;
 import re;
+import signal;
 import subprocess;
 import datetime;
 from collections import Counter;
@@ -117,24 +118,24 @@ def main():
 				os.system('[ "`/sbin/ip6tables -nvL INPUT | grep GUARDIAN | wc -l`" -gt 0 ] && /sbin/ip6tables -nvL INPUT | grep -E \'(GUARDIAN|pkts)\' | sed "s/^/    /"');
 
 				tmplog = open(TG_LOG, 'r').read()
-				print('[*] Most viewed TCP ports');			
+				print('[*] Most viewed \033[1;31mTCP\033[0m ports');
 				z=re.findall('access to TCP port ([0-9]+)', tmplog)
 				for port,count in Counter(z).most_common(20):
-					print('%05d count on port %d'%(count,port));
-				print('[*] Most viewed UDP ports');
+					print('%05d count on port %s'%(count,port));
+				print('[*] Most viewed \033[1;31mUDP\033[0m ports');
 				z=re.findall('access to UDP port ([0-9]+)', tmplog)
 				for port,count in Counter(z).most_common(20):
-					print('%05d count on port %d'%(count,port));
-
-				currentWeek = str(datetime.date(2010, 6, 16).isocalendar().week)
-				print('[*] Most viewed TCP ports this week');
+					print('%05d count on port %s'%(count,port));
+				print('\n');
+				currentWeek = datetime.date.today().strftime('%V')
+				print('[*] Most viewed \033[1;31mTCP\033[0m ports this week (%s)'%(currentWeek));
 				z=re.findall('#'+currentWeek+'&[^\r\n]+ access to TCP port ([0-9]+)', tmplog)
 				for port,count in Counter(z).most_common(20):
-					print('%05d count on port %d'%(count,port));
-				print('[*] Most viewed UDP ports this week');					
+					print('%05d count on port %s'%(count,port));
+				print('[*] Most viewed \033[1;31mUDP\033[0m ports this week (%s)'%(currentWeek));
 				z=re.findall('#'+currentWeek+'&[^\r\n]+ access to UDP port ([0-9]+)', tmplog)
 				for port,count in Counter(z).most_common(20):
-					print('%05d count on port %d'%(count,port));
+					print('%05d count on port %s'%(count,port));
 
 				print('');
 				try:
@@ -183,16 +184,12 @@ def main():
 			elif sys.argv[1] == 'kill' or sys.argv[1] == 'stop' or sys.argv[1] == 'cleanup':
 				print('[*] Stopping guardian');
 				try:
+					pid = open(TG_RUN_PID, 'r').read();
+					os.kill(int(pid,10),signal.SIGKILL);
 					os.remove(TG_RUN_PID);
 				except:
 					pass;
-				print('[*] Cleaning iptables rules');
-				os.system('iptables -F; iptables -X; ip6tables -F; ip6tables -X');
-				print('[*] Enable logging martians packets');
-				with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
-					fp.write('1\n');
-				with open('/proc/sys/net/ipv4/conf/default/log_martians', 'w') as fp:
-					fp.write('1\n');
+				clearIpTables();
 				if sys.argv[1] == 'cleanup':
 					print('[*] UnBan all');
 					os.system("ip r | grep -F 'blackhole' | awk '{print $2}' | xargs -I '{}' ip r del '{}'");
@@ -444,19 +441,44 @@ def reloadFileRotate( fp ):
 	return fp;
 
 
+def clearIpTables():
+	print('[*] Cleaning iptables rules');
+	runcmd('iptables -F GUARDIAN');
+	runcmd('ip6tables -F GUARDIAN');
+	stdout,stderr = runcmd('iptables -nvL INPUT --line-numbers');
+	stdout = re.findall(r'\s+([0-9]+)[^\r\n]+ GUARDIAN \\*', stdout)
+	stdout.reverse()
+	for row in stdout:
+		runcmd('iptables -D INPUT '+row);
+	runcmd('iptables -X GUARDIAN');
+
+	stdout,stderr = runcmd('ip6tables -nvL INPUT --line-numbers');
+	stdout = re.findall(r'\s+([0-9]+)[^\r\n]+ GUARDIAN \\*', stdout)
+	stdout.reverse()
+	for row in stdout:
+		runcmd('ip6tables -D INPUT '+row);
+	runcmd('ip6tables -X GUARDIAN');
+
+	print('[*] Enable logging martians packets');
+	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
+		fp.write('1\n');
+	with open('/proc/sys/net/ipv4/conf/default/log_martians', 'w') as fp:
+		fp.write('1\n');
+
+
 def initIptables():
 	print('[%s] Init iptables'%(strftime(TG_DATE_FORMAT)));
 	print('[%s] List of TCP ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS_TCP));
 	print('[%s] List of UDP ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS_UDP));
-	runcmd('iptables -F; iptables -X; ip6tables -F; ip6tables -X');
-	runcmd('iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
-	runcmd('ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
+	clearIpTables();
+	runcmd('iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "GUARDIAN"');
+	runcmd('ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "GUARDIAN"');
 
 	runcmd('iptables -N GUARDIAN');
 	runcmd('ip6tables -N GUARDIAN');
-	runcmd('iptables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
+	runcmd('iptables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]" -m comment --comment "GUARDIAN"');
 	runcmd('iptables -A GUARDIAN -j DROP');
-	runcmd('ip6tables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]"');
+	runcmd('ip6tables -A GUARDIAN -j LOG --log-prefix "[GUARDIAN]" -m comment --comment "GUARDIAN"');
 	runcmd('ip6tables -A GUARDIAN -j DROP');
 
 	invert = '';
@@ -464,17 +486,17 @@ def initIptables():
 	if TG_WATCH_PORTS_TCP.startswith('!'):
 		ports = TG_WATCH_PORTS_TCP[1:];
 		invert = '!';
-	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
-	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
-	
+	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
+	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
+
 	invert = '';
 	ports = TG_WATCH_PORTS_UDP;
 	if TG_WATCH_PORTS_UDP.startswith('!'):
 		ports = TG_WATCH_PORTS_UDP[1:];
 		invert = '!';
-	runcmd('iptables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
-	runcmd('ip6tables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN'%(TG_INTERFACE,invert,ports));
-	
+	runcmd('iptables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
+	runcmd('ip6tables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
+
 	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
@@ -567,5 +589,6 @@ esac
 exit 0
 '''.strip('\r\n\t ');
 
-main();
+if __name__ == "__main__":
+	main();
 
