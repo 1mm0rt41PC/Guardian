@@ -26,6 +26,8 @@ import signal;
 import subprocess;
 import datetime;
 from collections import Counter;
+import logging;
+from logging.handlers import RotatingFileHandler;
 
 os.umask(0o077);# default umask => rw- --- ---
 
@@ -40,17 +42,17 @@ os.umask(0o077);# default umask => rw- --- ---
 # if TG_WATCH_PORTS_TCP='auto' => TG_WATCH_PORTS_TCP will be generated at with netstat/ss
 # It's possible to invert the list of ports by adding an extra ! before the list:
 # TG_WATCH_PORTS_TCP='!22,80,443' => banny any access to all ports except on ports 22,80,443
-TG_WATCH_PORTS_TCP = 'auto';
-TG_WATCH_PORTS_UDP = 'auto';
-TG_INTERFACE = 'ens3'; # Interface to watch
+TG_WATCH_PORTS_TCP = os.getenv('WATCH_PORTS_TCP','auto');
+TG_WATCH_PORTS_UDP = os.getenv('WATCH_PORTS_UDP','auto');
+TG_INTERFACE = os.getenv('INTERFACE','ens3'); # Interface to watch
 # List of files to be monitored with the associated filter detector
 TG_LOGS_WATCHER = {
 	'/var/log/nginx/access.log': 'httpFilter',
 	'/var/log/auth.log': 'authSSHFilter',
 	'/var/log/messages': 'kernelLog'
 };
-TG_BAN_LEN = 60*30;# Ban duration in seconde (default: 30 minutes)
-TG_BAN_INC = 60*5;# Ban duration in case of recurrence in seconde. This time is added according to the following formula: {TG_BAN_LEN}+{Number of ban}*TG_BAN_INC
+TG_BAN_LEN = int(str(os.getenv('BAN_DURATION',str(60*30))),10);# Ban duration in seconde (default: 30 minutes)
+TG_BAN_INC = int(str(os.getenv('BAN_INCREMENTATION',str(60*5))),10);# Ban duration in case of recurrence in seconde. This time is added according to the following formula: {TG_BAN_LEN}+{Number of ban}*TG_BAN_INC
 # ^ - CONFIGURATION - ^
 ####################################################################################################
 
@@ -59,14 +61,15 @@ TG_BAN_INC = 60*5;# Ban duration in case of recurrence in seconde. This time is 
 TG_RUN_PID = '/var/run/guardian.pid';
 TG_BAN = '/var/run/guardian';
 TG_LOG = '/var/log/guardian.log';
-TG_DATE_FORMAT = '%Y/%m/%d #%U& %H:%M:%S';
 TG_WHITE_IP = '127.0.0.1';
-if os.path.exists('/etc/guardian.allow'):
-	with open('/etc/guardian.allow','r') as fp:
+
+os.makedirs('/etc/guardian/', exist_ok=True) 
+if os.path.exists('/etc/guardian/allow'):
+	with open('/etc/guardian/allow','r') as fp:
 		TG_WHITE_IP += '\n'+fp.read().replace('\r','');
 TG_BLACK_IP = '';
-if os.path.exists('/etc/guardian.deny'):
-	with open('/etc/guardian.deny','r') as fp:
+if os.path.exists('/etc/guardian/deny'):
+	with open('/etc/guardian/deny','r') as fp:
 		TG_BLACK_IP += '\n'+fp.read().replace('\r','');
 TG_BANED_IP_COUNTER = {};
 # Convert TG_LOGS_WATCHER
@@ -101,7 +104,8 @@ os.makedirs(TG_BAN, exist_ok=True)
 TG_ISTESTREGEXP = 0;
 
 def main():
-	global TG_ISTESTREGEXP,TG_RUN_PID;
+	global TG_ISTESTREGEXP,TG_RUN_PID, log;
+	log = iniLog(__name__, TG_LOG);
 	try:
 		if len(sys.argv) == 2:
 			if sys.argv[1] == 'status' or sys.argv[1] == 'st':
@@ -164,7 +168,7 @@ def main():
 				os.system('systemctl daemon-reload');
 				open('/etc/init.d/guardian', 'w').write(initd);
 				os.system('chmod ugo=rx /etc/init.d/guardian');
-				print('Install OK');
+				print('[+] Install OK');
 				sys.exit(0);
 			elif sys.argv[1] == 'log':
 				os.system('cat '+TG_LOG);
@@ -179,10 +183,10 @@ def main():
 						sys.exit(0);
 				except Exception as e:
 					pass;
-				os.system('setsid %s daemon & \n echo "Service up and running"; ps faux | grep -E \'[g]uardian\' | grep -F daemon'%(sys.argv[0]));
+				os.system(f'setsid {sys.argv[0]} daemon & \n echo "Service up and running"; ps faux | grep -E \'[g]uardian\' | grep -F daemon');
 				sys.exit(0);
 			elif sys.argv[1] == 'kill' or sys.argv[1] == 'stop' or sys.argv[1] == 'cleanup':
-				print('[*] Stopping guardian');
+				log.info('[*] Stopping guardian');
 				try:
 					pid = open(TG_RUN_PID, 'r').read();
 					os.kill(int(pid,10),signal.SIGKILL);
@@ -191,51 +195,47 @@ def main():
 					pass;
 				clearIpTables();
 				if sys.argv[1] == 'cleanup':
-					print('[*] UnBan all');
+					log.info('[*] UnBan all');
 					os.system("ip r | grep -F 'blackhole' | awk '{print $2}' | xargs -I '{}' ip r del '{}'");
 					os.system("rm -rf -- "+TG_BAN+"*");
 					sys.exit(0);
 				sys.exit(0);
 			elif sys.argv[1] == 'standalone':
-				print('[*] Standalone mode');
+				log.info('[*] Standalone mode');
 
 			elif sys.argv[1] == 'daemon':
-				print('[*] Dameon mode');
-				sys.stdout = open(TG_LOG, 'a+');
-				sys.stderr = sys.stdout;
+				log.info('[*] Dameon mode');
 				with open(TG_RUN_PID,'w') as fp:
 					fp.write(str(os.getpid()));
 					fp.flush();
-				print('[%s] '%(strftime(TG_DATE_FORMAT))+'*'*100);
-				print('[%s] Dameon mode'%(strftime(TG_DATE_FORMAT)));
-				sys.stdout.flush();
+				log.info('Dameon mode');
 
 			elif sys.argv[1] == 'test':
-				print('[*] Test RegExp');
+				log.info('[*] Test RegExp');
 				TG_ISTESTREGEXP = 1;
 				try:
 					initIptables();
 					for lg in TG_LOGS_WATCHER:
-						print('[%s] Watch log %s'%(strftime(TG_DATE_FORMAT),lg));
-						fp = open(lg, 'r');
-						TG_LOGS_WATCHER[lg]['fp'] = fp;
+						if os.path.exists(lg):
+							log.info(f'Watch log {lg}');
+							fp = open(lg, 'r');
+							TG_LOGS_WATCHER[lg]['fp'] = fp;
+						else:
+							log.warning(f'Log {lg} doesn\'t exist. Not watching...');
 
 					while 1:
 						for lg in TG_LOGS_WATCHER:
 							_eof = False;
-							while not _eof:
-								line = TG_LOGS_WATCHER[lg]['fp'].readline();
-								if line:
-									globals()[TG_LOGS_WATCHER[lg]['callback']](line);
-								else:
-									_eof = True;
+							if TG_LOGS_WATCHER[lg]['fp'] != None:
+								while not _eof:
+									line = TG_LOGS_WATCHER[lg]['fp'].readline();
+									if line:
+										globals()[TG_LOGS_WATCHER[lg]['callback']](line);
+									else:
+										_eof = True;
 						sleep(0.5);
 				except Exception as e:
-					import traceback;
-					print(str(e));
-					traceback.print_exc();
-					import pdb; pdb.set_trace();
-
+					log.exception(str(e));
 			else:
 				raise Exception('');
 		elif len(sys.argv) == 3:
@@ -260,28 +260,48 @@ def main():
 		sys.exit(0);
 
 	initIptables();
-	for lg in TG_LOGS_WATCHER:
-		print('[%s] Watch log %s'%(strftime(TG_DATE_FORMAT),lg));
-		fp = open(lg, 'r');
-		fp.seek(0, 2);# Set the cursor to the end
-		TG_LOGS_WATCHER[lg]['fp'] = fp;
+	for lg in TG_LOGS_WATCHER:		
+		if os.path.exists(lg):
+			log.info(f'Watch log {lg}');
+			fp = open(lg, 'r');
+			fp.seek(0, 2);# Set the cursor to the end
+			TG_LOGS_WATCHER[lg]['fp'] = fp;
+		else:
+			log.warning(f'Log {lg} doesn\'t exist. Not watching...');
+			TG_LOGS_WATCHER[lg]['fp'] = None
 
 
-	print('[%s] The Guardian is up and running'%(strftime(TG_DATE_FORMAT)));
-	sys.stdout.flush();
+	log.info('The Guardian is up and running');
 	while 1:
 		for lg in TG_LOGS_WATCHER:
 			_eof = False;
-			if 'reloadFileRotate' in TG_LOGS_WATCHER[lg]:
-				TG_LOGS_WATCHER[lg]['fp'] = reloadFileRotate(TG_LOGS_WATCHER[lg]['fp']);
-			while not _eof:
-				line = TG_LOGS_WATCHER[lg]['fp'].readline();
-				if line:
-					globals()[TG_LOGS_WATCHER[lg]['callback']](line);
-				else:
-					_eof = True;
+			if TG_LOGS_WATCHER[lg]['fp'] != None:
+				if 'reloadFileRotate' in TG_LOGS_WATCHER[lg]:
+					TG_LOGS_WATCHER[lg]['fp'] = reloadFileRotate(TG_LOGS_WATCHER[lg]['fp']);
+				while not _eof:
+					line = TG_LOGS_WATCHER[lg]['fp'].readline();
+					if line:
+						globals()[TG_LOGS_WATCHER[lg]['callback']](line);
+					else:
+						_eof = True;
 		cleanup();
 		sleep(1);
+
+
+def iniLog( name, logfile, logLevel=logging.INFO ):
+	lg = logging.getLogger(name);
+	lg.setLevel(logLevel);		
+	_formatter = logging.Formatter('[%(asctime)s][%(levelname)s][%(filename)s:%(lineno)3d] %(message)s')
+	stdoutHandler = logging.StreamHandler();
+	stdoutHandler.setFormatter(_formatter);
+	stdoutHandler.setLevel(logLevel);
+	lg.addHandler(stdoutHandler);
+	# création d'un handler qui va rediriger une écriture du log vers
+	# un fichier en mode 'append', avec 7 backup et une taille max de 10Mo
+	fileHandler = RotatingFileHandler( logfile, 'a', 1000000*10, backupCount=7 );
+	fileHandler.setFormatter(_formatter);
+	lg.addHandler(fileHandler);
+	return lg;
 
 
 def getProcessInfo():
@@ -302,57 +322,49 @@ def listSSHConnexion():
 
 def ban( ip, reason, black=False, iptables=False ):
 	global TG_ISTESTREGEXP;
-	print('[%s] Ban IP %s with the reason %s'%(strftime(TG_DATE_FORMAT),ip,reason));
+	log.info(f'Ban IP {ip} with the reason {reason}');
 	if ip == '-':
-		print('''[%s] \033[31;1mInvalid IP (%s) for the http module !\033[0m In /etc/nginx/nginx.conf put log_format main '$remote_addr - $remote_user [$time_local] "$host" "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time';'''%(strftime(TG_DATE_FORMAT),ip));
+		log.error(f'''Invalid IP ({ip}) for the http module ! In /etc/nginx/nginx.conf put log_format main '$remote_addr - $remote_user [$time_local] "$host" "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time';''');
 		return ;
 	if ip in listSSHConnexion():
-		print('[%s] IP %s is connected via SSH. No ban for that IP !'%(strftime(TG_DATE_FORMAT),ip));
-		sys.stdout.flush();
-		sys.stderr.flush();
+		log.info(f'IP {ip} is connected via SSH. No ban for that IP !');
 		return;
 	if '\n'+ip+'\n' in TG_WHITE_IP:
-		print('[%s] IP %s is white listed'%(strftime(TG_DATE_FORMAT),ip));
-		sys.stdout.flush();
-		sys.stderr.flush();
+		log.info(f'IP {ip} is white listed');
 		return;
 	if not TG_ISTESTREGEXP:# Si on n'est pas en mode test => on ban
 		if not black:
 			open(TG_BAN+'/'+ip,'w').close();
 		if ':' in ip:
 			if iptables:
-				runcmd('ip6tables -I INPUT 1 ! -i lo -s %s -m comment --comment \'%s\' -j DROP'%(ip, '[GUARDIAN] '+reason));
+				runcmd(f'ip6tables -I INPUT 1 ! -i lo -s {ip} -m comment --comment \'[GUARDIAN] {reason}\' -j DROP');
 			else:
-				runcmd('ip -6 r add blackhole "%s" >> %s 2>&1'%(ip, TG_LOG));
+				runcmd(f'ip -6 r add blackhole "{ip}" >> {TG_LOG} 2>&1');
 		else:
 			if iptables:
-				runcmd('iptables -I INPUT 1 ! -i lo -s %s -m comment --comment \'%s\' -j DROP'%(ip, '[GUARDIAN] '+reason));
+				runcmd(f'iptables -I INPUT 1 ! -i lo -s {ip} -m comment --comment \'[GUARDIAN] {reason}\' -j DROP');
 			else:
-				runcmd('ip r add blackhole "%s"'%(ip), ignoreTxt='RTNETLINK answers: File exists');
+				runcmd(f'ip r add blackhole "{ip}"', ignoreTxt='RTNETLINK answers: File exists');
 	if ip in TG_BANED_IP_COUNTER:
 		TG_BANED_IP_COUNTER[ip] += 1;
-		print('[%s] IP %s has been banned for %d minutes'%(strftime(TG_DATE_FORMAT),ip,TG_BAN_LEN/60 + TG_BANED_IP_COUNTER[ip]*TG_BAN_INC/60));
+		log.info(f'IP {ip} has been banned for {TG_BAN_LEN/60 + TG_BANED_IP_COUNTER[ip]*TG_BAN_INC/60} minutes');
 	else:
 		TG_BANED_IP_COUNTER[ip] = 1;
-		print('[%s] IP %s has been banned for %d minutes'%(strftime(TG_DATE_FORMAT),ip,TG_BAN_LEN/60));
-	sys.stdout.flush();
-	sys.stderr.flush();
+		log.info(f'IP {ip} has been banned for {TG_BAN_LEN/60} minutes');
 
 
 def unban( ip ):
-	print('[%s] unBan IP %s after %d minutes'%(strftime(TG_DATE_FORMAT),ip,(time() - os.stat(os.path.join(TG_BAN,ip)).st_mtime)/60));
+	log.info(f'unBan IP {ip} after {(time() - os.stat(os.path.join(TG_BAN,ip)).st_mtime)/60} minutes');
 	if ':' in ip:
-		runcmd('ip -6 r del "%s"'%(ip));
+		runcmd(f'ip -6 r del "{ip}"');
 	else:
-		runcmd('ip r del "%s"'%(ip));
+		runcmd(f'ip r del "{ip}"');
 	os.remove(TG_BAN+'/'+ip);
-	sys.stdout.flush();
-	sys.stderr.flush();
 
 
 def loadTimer4Ban():
 	global TG_BANED_IP_COUNTER;
-	print('[%s] Loading ban timer for each IP...'%(strftime(TG_DATE_FORMAT)));
+	log.info('Loading ban timer for each IP...');
 	data = '';
 	with open(TG_LOG, 'r') as fp:
 		data = fp.read();
@@ -362,7 +374,6 @@ def loadTimer4Ban():
 def cleanup():
 	now = time();
 	for ip in os.listdir(TG_BAN):
-		#Ban IP %s
 		if os.stat(os.path.join(TG_BAN,ip)).st_mtime < now - TG_BAN_LEN:
 			if ip in TG_BANED_IP_COUNTER:
 				if os.stat(os.path.join(TG_BAN,ip)).st_mtime < now - (TG_BAN_LEN + TG_BANED_IP_COUNTER[ip]*TG_BAN_INC):
@@ -406,14 +417,14 @@ def httpFilter( line ):
 		#if i[0] == '*':# regexp
 		#	pass;
 		if i.lower() in line.lower():
-			ban(line.split(' ')[0], '%s found in http request <%s>'%(i,line.strip('\r\n\t ')));
+			ban(line.split(' ')[0], f'{i} found in http request <{line.strip("\r\n\t ")}>');
 
 
 def authSSHFilter( line ):
 	if 'sshd' not in line:
 		return ;
 	if 'Invalid user' in line:
-		ban(line.split(' Invalid user ')[-1].split(' from ')[-1].split(' ')[0], 'invalide SSH user in <%s>'%(line.strip('\r\n\t ')));
+		ban(line.split(' Invalid user ')[-1].split(' from ')[-1].split(' ')[0], f'invalid SSH user in <{line.strip("\r\n\t ")}>');
 
 
 def kernelLog( line ):
@@ -434,7 +445,7 @@ def reloadFileRotate( fp ):
 	stat = os.stat(name);
 	stat = str(stat.st_dev)+'-'+str(stat.st_ino);
 	if name in _reloadFileRotate and (_reloadFileRotate[name]['size'] > size or _reloadFileRotate[name]['inode'] != stat ):
-		print('[%s] Log rotate detected on %s'%(strftime(TG_DATE_FORMAT),name));
+		log.info(f'Log rotate detected on {name}');
 		fp.close();
 		fp = open(name, 'r');
 	_reloadFileRotate[name] = {'size':size, 'inode':stat};
@@ -442,7 +453,7 @@ def reloadFileRotate( fp ):
 
 
 def clearIpTables():
-	print('[*] Cleaning iptables rules');
+	log.info('[*] Cleaning iptables rules');
 	runcmd('iptables -F GUARDIAN');
 	runcmd('ip6tables -F GUARDIAN');
 	stdout,stderr = runcmd('iptables -nvL INPUT --line-numbers');
@@ -459,7 +470,7 @@ def clearIpTables():
 		runcmd('ip6tables -D INPUT '+row);
 	runcmd('ip6tables -X GUARDIAN');
 
-	print('[*] Enable logging martians packets');
+	log.info('[*] Enable logging martians packets');
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('1\n');
 	with open('/proc/sys/net/ipv4/conf/default/log_martians', 'w') as fp:
@@ -467,9 +478,9 @@ def clearIpTables():
 
 
 def initIptables():
-	print('[%s] Init iptables'%(strftime(TG_DATE_FORMAT)));
-	print('[%s] List of TCP ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS_TCP));
-	print('[%s] List of UDP ports watched %s'%(strftime(TG_DATE_FORMAT),TG_WATCH_PORTS_UDP));
+	log.info('Init iptables');
+	log.info('List of TCP ports watched {TG_WATCH_PORTS_TCP}');
+	log.info('List of UDP ports watched {TG_WATCH_PORTS_UDP}');
 	clearIpTables();
 	runcmd('iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "GUARDIAN"');
 	runcmd('ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "GUARDIAN"');
@@ -486,18 +497,18 @@ def initIptables():
 	if TG_WATCH_PORTS_TCP.startswith('!'):
 		ports = TG_WATCH_PORTS_TCP[1:];
 		invert = '!';
-	runcmd('iptables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
-	runcmd('ip6tables -A INPUT -i %s -p tcp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
+	runcmd(f'iptables  -A INPUT -i {TG_INTERFACE} -p tcp -m multiport {invert} --dports {ports} -j GUARDIAN -m comment --comment "GUARDIAN"');
+	runcmd(f'ip6tables -A INPUT -i {TG_INTERFACE} -p tcp -m multiport {invert} --dports {ports} -j GUARDIAN -m comment --comment "GUARDIAN"');
 
 	invert = '';
 	ports = TG_WATCH_PORTS_UDP;
 	if TG_WATCH_PORTS_UDP.startswith('!'):
 		ports = TG_WATCH_PORTS_UDP[1:];
 		invert = '!';
-	runcmd('iptables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
-	runcmd('ip6tables -A INPUT -i %s -p udp -m multiport %s --dports %s -j GUARDIAN -m comment --comment "GUARDIAN"'%(TG_INTERFACE,invert,ports));
+	runcmd(f'iptables  -A INPUT -i {TG_INTERFACE} -p udp -m multiport {invert} --dports {ports} -j GUARDIAN -m comment --comment "GUARDIAN"');
+	runcmd(f'ip6tables -A INPUT -i {TG_INTERFACE} -p udp -m multiport {invert} --dports {ports} -j GUARDIAN -m comment --comment "GUARDIAN"');
 
-	print('[%s] Disable logging martians packets'%(strftime(TG_DATE_FORMAT)));
+	log.info('Disable logging martians packets');
 	with open('/proc/sys/net/ipv4/conf/all/log_martians', 'w') as fp:
 		fp.write('0\n');
 	with open('/proc/sys/net/ipv4/conf/default/log_martians', 'w') as fp:
@@ -513,23 +524,23 @@ def logStatus():
 		fp.write('[*] Actualy white listed\n');
 		fp.write('    '+TG_WHITE_IP.strip('\r\n\t ').replace('\n','\n    ')+'\n');
 		fp.write('\n');
-		fp.write('[*] List of TCP ports watched:\n    %s\n'%(TG_WATCH_PORTS_TCP));
-		fp.write('[*] List of UDP ports watched:\n    %s\n'%(TG_WATCH_PORTS_UDP));
+		fp.write(f'[*] List of TCP ports watched:\n    {TG_WATCH_PORTS_TCP}\n');
+		fp.write(f'[*] List of UDP ports watched:\n    {TG_WATCH_PORTS_UDP}\n');
 
 
 def runcmd(cmd, echo=False, ignoreTxt=''):
 	if echo:
-		print('[*] BASH: %s'%(cmd));
+		log.debug('[*] BASH: '+cmd);
 		os.system(cmd);
 		return ;
-	stdout,stderr = subprocess.Popen('%s'%(cmd), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
+	stdout,stderr = subprocess.Popen(str(cmd), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).communicate();
 	stdout = stdout.decode('utf8');
 	stderr = stderr.decode('utf8');
 	if stderr.strip('\r\n\t '):
 		if ignoreTxt and (ignoreTxt in stdout or ignoreTxt in stderr):
 			return (stdout,stderr);
-		print('[*] BASH: %s'%(cmd));
-		print('[*] BASH ret: %s %s'%(stdout,stderr));
+		log.info('[*] BASH: '+cmd);
+		log.debug(f'[*] BASH ret: {stdout} / {stderr}');
 	return (stdout,stderr);
 
 

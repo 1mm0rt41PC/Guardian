@@ -1,9 +1,13 @@
 # The Guardian
 
 `The Guadian` is a simple script that watch for unusual tcp/http/ssh activity and ban ip via routing. It's a fail2ban like with some integrated feature and simplified configuration. 
-The script install a iptables rule to catch all trafic to closed ports. Then the script parse logs: /var/log/messages /var/log/nginx/access.log
-This script require python2 or python3.
+The script install a iptables rule to catch all trafic to closed ports. Then the script parse logs: `/var/log/messages` `/var/log/nginx/access.log`
 
+
+# Docker
+```bash
+docker run --name guardian -d --restart=always -v /var/log:/var/log -v /etc/guardian/:/etc/guardian/:ro -v /sys:/sys -v /proc:/proc -v /dev:/dev --network=host --privileged -e WATCH_PORTS_TCP=auto -e WATCH_PORTS_UDP=auto -e INTERFACE=ens3 -e BAN_DURATION=`expr 60 '*' 30` -e BAN_INCREMENTATION=`expr 60 '*' 5` 1mm0rt41pc/guardian
+```
 
 # Install
 ```bash
@@ -11,32 +15,24 @@ This script require python2 or python3.
 root@1mmort41:~$ wget https://github.com/1mm0rt41PC/Guardian/raw/master/guardian.py -O /root/guardian.py
 
 # Edit the configuration in the script:
-root@1mmort41:~$ vim /root/guardian.py
-...
-####################################################################################################
-# v - CONFIGURATION - v
-TG_ETH = 'ens3';# Interface to watch
+root@1mmort41:~$ cat .env
 # List of ports to be monitored.
-# if TG_WATCH_PORTS='auto' => TG_WATCH_PORTS will be generated at with netstat/ss
+# if WATCH_PORTS_TCP='auto' => WATCH_PORTS_TCP will be generated at with netstat/ss
 # It's possible to invert the liste of ports by adding an extra ! before the list:
-# TG_WATCH_PORTS='!22,80,443' => banny any access to all ports except on ports 22,80,443
-TG_WATCH_PORTS = 'auto';
-
-# List of files to be monitored with the associated filter detector
-TG_LOGS_WATCHER = {
-	'/var/log/nginx/access.log': 'httpFilter',
-	'/var/log/auth.log': 'authSSHFilter',
-	'/var/log/messages': 'kernelLog'
-};
-TG_BAN_LEN = 60*30;# Ban duration in seconde (default: 30 minutes)
-TG_BAN_INC = 60*5;# Ban duration in case of recurrence in seconde. This time is added according to the following formula: {TG_BAN_LEN}+{Number of ban}*TG_BAN_INC
-# ^ - CONFIGURATION - ^
-####################################################################################################
-...
-
+# WATCH_PORTS_TCP='!22,80,443' => banny any access to all ports except on ports 22,80,443
+export WATCH_PORTS_TCP=auto
+export WATCH_PORTS_UDP=auto
+# Interface to watch
+export INTERFACE=ens3
+# Ban duration in seconde (default: 30 minutes)
+export BAN_DURATION=`expr 60 '*' 30`
+# Ban duration in case of recurrence in seconde. This time is added according to the following formula: {TG_BAN_LEN}+{Number of ban}*TG_BAN_INC
+export BAN_INCREMENTATION=`expr 60 '*' 5`
+root@1mmort41:~$ source .env
 root@1mmort41:~$ python /root/guardian.py install
 
 # Run The Guardian
+
 root@1mmort41:~$ guardian run
 NB instance: 1
 root     30469  0.0  0.3  25120  7844 ?        Ss   22:31   0:00 /usr/bin/python /usr/local/bin/guardian daemon
