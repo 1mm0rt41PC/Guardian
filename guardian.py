@@ -479,8 +479,8 @@ def clearIpTables():
 
 def initIptables():
 	log.info('Init iptables');
-	log.info('List of TCP ports watched {TG_WATCH_PORTS_TCP}');
-	log.info('List of UDP ports watched {TG_WATCH_PORTS_UDP}');
+	log.info(f'List of TCP ports watched {TG_WATCH_PORTS_TCP}');
+	log.info(f'List of UDP ports watched {TG_WATCH_PORTS_UDP}');
 	clearIpTables();
 	runcmd('iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "GUARDIAN"');
 	runcmd('ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "GUARDIAN"');
